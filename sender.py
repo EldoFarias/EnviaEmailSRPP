@@ -149,7 +149,8 @@ cooldown_tentativa_5_mais = 30
             AND (
                 (cep.StatusProcessamento = 'PENDENTE' AND cep.EmailEnviado = 0) OR
                 (cep.StatusProcessamento = 'ENVIADO' AND cep.EmailEnviado = 1) OR
-                (cep.StatusProcessamento = 'ERRO_VALIDACAO' AND cep.EmailEnviado = 0)
+                (cep.StatusProcessamento = 'ERRO_VALIDACAO' AND cep.EmailEnviado = 0) OR
+                (cep.StatusProcessamento = 'INVALIDO' AND cep.EmailEnviado = 0)
             )
         ORDER BY cep.DataPedidoFechado
         """
@@ -163,18 +164,18 @@ cooldown_tentativa_5_mais = 30
             
             for row in resultados:
                 numero_pedido = row.NroPedido
-                versao_enviada = row.VersaoPdfEnviada or 0
+                versao_enviada = int(row.VersaoPdfEnviada) if row.VersaoPdfEnviada is not None else 0
                 status_atual = row.StatusProcessamento
-                
+
                 caminho_pdf, versao_disponivel = self.buscar_pdf_pedido(numero_pedido)
-                
+
                 deve_processar = False
                 motivo = ""
-                
+
                 if not caminho_pdf:
                     self.logger.warning(f"Pedido {numero_pedido}: PDF não encontrado, pulando...")
                     continue
-                elif status_atual == 'PENDENTE' and row.EmailEnviado == 0:
+                elif status_atual in ('PENDENTE', 'INVALIDO') and row.EmailEnviado == 0:
                     deve_processar = True
                     motivo = "PRIMEIRO_ENVIO"
                 elif status_atual == 'ENVIADO' and versao_disponivel > versao_enviada:
@@ -361,18 +362,31 @@ class ExcelLogger:
         self.caminho_base = r"C:\Users\Public\Documents\SRPP\scripts"
         os.makedirs(self.caminho_base, exist_ok=True)
         self.arquivo_atual = os.path.join(self.caminho_base, f"log_emails_{datetime.now().strftime('%Y-%m-%d')}.xlsx")
-        if os.path.exists(self.arquivo_atual):
-            self.workbook = openpyxl.load_workbook(self.arquivo_atual)
-        else:
-            self.workbook = openpyxl.Workbook()
-            self.workbook.remove(self.workbook.active)
-            self.workbook.create_sheet("RESUMO")
-            self.configurar_aba(self.workbook["RESUMO"], ["Data/Hora", "Pedido", "Cliente", "Email", "Status", "Motivo", "Tentativas", "Versão PDF", "Observações"])
-            self.workbook.create_sheet("LOG_GERAL")
-            self.configurar_aba(self.workbook["LOG_GERAL"], ["Timestamp", "Pedido", "Cliente", "Fase", "Detalhes", "Validações", "Erro", "Duração", "Thread"])
-            self.salvar()
+
+        try:
+            if os.path.exists(self.arquivo_atual):
+                self.workbook = openpyxl.load_workbook(self.arquivo_atual)
+            else:
+                self._criar_novo_workbook()
+        except Exception as e:
+            # Se arquivo estiver corrompido, renomeia e cria novo
+            if os.path.exists(self.arquivo_atual):
+                backup_name = self.arquivo_atual.replace('.xlsx', f'_corrupted_{datetime.now().strftime("%H%M%S")}.xlsx')
+                os.rename(self.arquivo_atual, backup_name)
+            self._criar_novo_workbook()
+
         self.aba_resumo = self.workbook["RESUMO"]
         self.aba_geral = self.workbook["LOG_GERAL"]
+
+    def _criar_novo_workbook(self):
+        """Cria um novo workbook Excel"""
+        self.workbook = openpyxl.Workbook()
+        self.workbook.remove(self.workbook.active)
+        self.workbook.create_sheet("RESUMO")
+        self.configurar_aba(self.workbook["RESUMO"], ["Data/Hora", "Pedido", "Cliente", "Email", "Status", "Motivo", "Tentativas", "Versão PDF", "Observações"])
+        self.workbook.create_sheet("LOG_GERAL")
+        self.configurar_aba(self.workbook["LOG_GERAL"], ["Timestamp", "Pedido", "Cliente", "Fase", "Detalhes", "Validações", "Erro", "Duração", "Thread"])
+        self.salvar()
 
     def configurar_aba(self, aba, cabecalhos):
         """Configura cabeçalhos e formatação de uma aba"""
