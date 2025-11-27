@@ -1,0 +1,32 @@
+
+[SQL_SERVER]
+servidor = 127.0.0.1
+banco_de_dados = SRPP
+usuario = sa
+senha = SUA_SENHA_AQUI
+driver = ODBC Driver 17 for SQL Server
+
+[PDFS]
+caminho = C:\Users\Public\Documents\SRPP\PDFs
+
+[EMAIL]
+# Para Gmail: smtp.gmail.com
+# Para Outlook: smtp-mail.outlook.com
+smtp_servidor = smtp.gmail.com
+smtp_porta = 587
+usuario = seu_email@gmail.com
+senha_app = sua_senha_app_sem_espacos_aqui
+remetente_nome = VENDAS SINT
+
+[SISTEMA]
+verificacao_inicial = True
+aguardar_segundos_apos_arquivo = 5
+verificacao_periodica_ativa = True
+verificacao_periodica_minutos = 1
+# SISTEMA INTELIGENTE DE TENTATIVAS (Cool-down Progressivo)
+max_tentativas = DESABILITADO_USA_COOLDOWN
+cooldown_tentativa_1 = 2
+cooldown_tentativa_2 = 5
+cooldown_tentativa_3 = 10
+cooldown_tentativa_4 = 20
+cooldown_tentativa_5_mais = 30

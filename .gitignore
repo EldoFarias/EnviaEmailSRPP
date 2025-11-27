@@ -1,0 +1,39 @@
+# Arquivos de configuração com credenciais
+config.ini
+
+# Logs
+logs/
+*.log
+
+# Arquivos Excel de log
+*.xlsx
+
+# PDFs
+*.pdf
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+.venv
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Sistema operacional
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Temporários
+*.tmp
+*.bak
