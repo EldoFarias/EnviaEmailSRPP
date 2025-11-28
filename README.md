@@ -111,6 +111,35 @@ O sistema requer a tabela `ControleEmailPedidos` no SQL Server com os seguintes 
 - Use o `.gitignore` para proteger informações sensíveis
 - Mantenha as senhas de app do Gmail seguras
 
+## Distribuição e Instalação
+
+### 🚀 Gerar Executável e Instalador
+
+Para criar o executável (.exe) e instalador profissional:
+
+```bash
+criar_instalador_completo.bat
+```
+
+Este script:
+- Compila o código Python em executável standalone
+- Cria instalador profissional do Windows
+- Gera arquivo de ~15-20 MB pronto para distribuir
+
+**Documentação completa**:
+- `COMO_GERAR_EXE.md` - Guia completo de build
+- `INSTALACAO.md` - Guia de instalação para usuários finais
+
+### 📦 Arquivos Gerados
+
+- **Executável**: `dist\EnviaEmailSRPP.exe`
+- **Instalador**: `installer_output\EnviaEmailSRPP_Setup_v1.0.0.exe`
+
+**Recomendação**: Distribua o instalador (mais profissional e fácil para o usuário)
+
 ## Suporte
 
-Para problemas ou dúvidas, consulte os logs em `logs/envio_emails.log`
+Para problemas ou dúvidas:
+1. Consulte `INSTALACAO.md` para guia detalhado
+2. Consulte `COMO_GERAR_EXE.md` para problemas de build
+3. Verifique os logs em `logs/envio_emails.log`

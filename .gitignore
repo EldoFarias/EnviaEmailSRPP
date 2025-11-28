@@ -37,3 +37,10 @@ desktop.ini
 # Temporários
 *.tmp
 *.bak
+
+# Build e distribuição
+build/
+dist/
+installer_output/
+*.exe
+*.msi
