@@ -4,6 +4,8 @@ servidor = 127.0.0.1
 banco_de_dados = SRPP
 usuario = sa
 senha = SUA_SENHA_AQUI
+# Driver ODBC (sistema tenta automaticamente outros drivers se este não estiver disponível)
+# Opções: ODBC Driver 18/17/13.1/13/11 for SQL Server
 driver = ODBC Driver 17 for SQL Server
 
 [PDFS]

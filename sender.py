@@ -109,30 +109,80 @@ cooldown_tentativa_5_mais = 30
         if not EXCEL_DISPONIVEL:
             self.logger.warning("openpyxl não disponível - logs em Excel desabilitados")
             return
-            
+
         try:
             self.excel_logger = ExcelLogger()
             self.logger.info("Sistema de logs Excel iniciado")
         except Exception as e:
             self.logger.error(f"Erro ao inicializar logs Excel: {e}")
             self.excel_logger = None
+
+    def listar_drivers_odbc_disponiveis(self):
+        """Lista todos os drivers ODBC instalados no sistema"""
+        try:
+            drivers = pyodbc.drivers()
+            self.logger.info(f"Drivers ODBC instalados no sistema: {len(drivers)}")
+            for driver in drivers:
+                self.logger.info(f"  - {driver}")
+            return drivers
+        except Exception as e:
+            self.logger.error(f"Erro ao listar drivers ODBC: {e}")
+            return []
         
     def conectar_banco(self):
-        """Estabelece conexão com SQL Server"""
-        try:
-            conn_str = (
-                f"DRIVER={{{self.config['SQL_SERVER']['driver']}}};"
-                f"SERVER={self.config['SQL_SERVER']['servidor']};"
-                f"DATABASE={self.config['SQL_SERVER']['banco_de_dados']};"
-                f"UID={self.config['SQL_SERVER']['usuario']};"
-                f"PWD={self.config['SQL_SERVER']['senha']};"
-            )
-            self.conexao_db = pyodbc.connect(conn_str)
-            self.logger.info("Conectado ao banco de dados com sucesso")
-            return True
-        except Exception as e:
-            self.logger.error(f"Erro ao conectar no banco: {e}")
-            return False
+        """Estabelece conexão com SQL Server com fallback automático de drivers"""
+        # Lista de drivers ODBC em ordem de preferência (mais recente para mais antigo)
+        drivers_disponiveis = [
+            self.config['SQL_SERVER']['driver'],  # Driver configurado pelo usuário (prioridade)
+            'ODBC Driver 18 for SQL Server',
+            'ODBC Driver 17 for SQL Server',
+            'ODBC Driver 13.1 for SQL Server',
+            'ODBC Driver 13 for SQL Server',
+            'ODBC Driver 11 for SQL Server',
+            'SQL Server Native Client 11.0',
+            'SQL Server Native Client 10.0',
+            'SQL Server',
+        ]
+
+        # Remove duplicatas mantendo a ordem
+        drivers_unicos = []
+        for driver in drivers_disponiveis:
+            if driver not in drivers_unicos:
+                drivers_unicos.append(driver)
+
+        erros_tentativas = []
+
+        for driver in drivers_unicos:
+            try:
+                conn_str = (
+                    f"DRIVER={{{driver}}};"
+                    f"SERVER={self.config['SQL_SERVER']['servidor']};"
+                    f"DATABASE={self.config['SQL_SERVER']['banco_de_dados']};"
+                    f"UID={self.config['SQL_SERVER']['usuario']};"
+                    f"PWD={self.config['SQL_SERVER']['senha']};"
+                )
+                self.conexao_db = pyodbc.connect(conn_str)
+                self.logger.info(f"Conectado ao banco de dados com sucesso usando driver: {driver}")
+
+                # Se conectou com driver diferente do configurado, avisar
+                if driver != self.config['SQL_SERVER']['driver']:
+                    self.logger.warning(f"Driver configurado '{self.config['SQL_SERVER']['driver']}' não disponível. Usando '{driver}' como alternativa.")
+
+                return True
+
+            except Exception as e:
+                erros_tentativas.append(f"{driver}: {str(e)[:100]}")
+                # Continua tentando próximo driver
+
+        # Se chegou aqui, nenhum driver funcionou
+        self.logger.error("ERRO: Não foi possível conectar ao banco de dados com nenhum driver ODBC disponível")
+        self.logger.error("Drivers tentados:")
+        for erro in erros_tentativas:
+            self.logger.error(f"  - {erro}")
+        self.logger.error("SOLUÇÃO: Instale um driver ODBC para SQL Server:")
+        self.logger.error("  - Download: https://go.microsoft.com/fwlink/?linkid=2249004")
+
+        return False
             
     def buscar_pedidos_para_processar(self):
         """Busca todos os pedidos que precisam ser processados"""
@@ -403,6 +453,11 @@ cooldown_tentativa_5_mais = 30
     def testar_deteccao_versoes(self):
         """Função de teste para verificar detecção de versões de PDF sem enviar emails"""
         self.logger.info("=== TESTE: Verificando detecção de versões e sistema de tentativas ===")
+
+        # Listar drivers ODBC disponíveis
+        self.logger.info("=== Verificando drivers ODBC instalados ===")
+        self.listar_drivers_odbc_disponiveis()
+
         if not self.conectar_banco():
             self.logger.error("Erro ao conectar ao banco para teste")
             return
