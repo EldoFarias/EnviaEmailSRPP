@@ -137,11 +137,12 @@ cooldown_tentativa_5_mais = 30
     def buscar_pedidos_para_processar(self):
         """Busca todos os pedidos que precisam ser processados"""
         query = """
-        SELECT 
+        SELECT
             cep.Id, cep.NroPedido, cep.CodCliente, cep.DataPedidoFechado, cep.EmailsCopia,
             c.EMAIL as EmailCliente, c.NomeContato as NomeCliente,
             cep.VersaoPdfEnviada, cep.StatusProcessamento, cep.EmailEnviado,
-            cep.TentativasEnvio, NULL as DataUltimaVerificacao, cep.UltimoErro
+            cep.TentativasEnvio, NULL as DataUltimaVerificacao, cep.UltimoErro,
+            cep.EnviarEmailCliente
         FROM ControleEmailPedidos cep
         INNER JOIN CabecalhoPedido cap ON cap.NroPedido = cep.NroPedido
         INNER JOIN Cliente c ON c.CodCliente = cap.CodCliente
@@ -193,7 +194,7 @@ cooldown_tentativa_5_mais = 30
                         'versao_pdf_enviada': versao_enviada, 'status_atual': status_atual,
                         'versao_disponivel': versao_disponivel, 'motivo_processamento': motivo,
                         'caminho_pdf': caminho_pdf, 'tentativas_anteriores': row.TentativasEnvio or 0,
-                        'ultimo_erro': row.UltimoErro
+                        'ultimo_erro': row.UltimoErro, 'enviar_email_cliente': row.EnviarEmailCliente
                     })
                     
             self.logger.info(f"Encontrados {len(pedidos_para_processar)} pedidos para processar")
@@ -253,18 +254,51 @@ cooldown_tentativa_5_mais = 30
         except Exception as e:
             self.logger.error(f"Erro ao atualizar status do pedido {id_controle}: {e}")
             
-    def enviar_email(self, destinatario, nome_cliente, numero_pedido, caminho_pdf, emails_copia=None, eh_reenvio=False, versao_pdf=1):
+    def enviar_email(self, destinatario, nome_cliente, numero_pedido, caminho_pdf, emails_copia=None, eh_reenvio=False, versao_pdf=1, enviar_para_cliente=True):
         """Envia email com PDF anexo"""
         try:
+            # Determinar destinatários baseado em enviar_para_cliente
+            destinatario_principal = None
+            lista_copia = []
+
+            if enviar_para_cliente:
+                # Fluxo normal: envia para cliente e cópias
+                destinatario_principal = destinatario
+                if emails_copia:
+                    lista_copia = [email.strip() for email in emails_copia.split(',') if email.strip()]
+
+                if lista_copia:
+                    self.logger.info(f"Pedido {numero_pedido}: Enviando PARA cliente ({destinatario}) e CÓPIAS ({len(lista_copia)} email(s): {', '.join(lista_copia)})")
+                else:
+                    self.logger.info(f"Pedido {numero_pedido}: Enviando apenas PARA cliente ({destinatario}) - Sem emails em cópia")
+            else:
+                # Fluxo alternativo: envia apenas para emails de cópia
+                if emails_copia:
+                    lista_emails = [email.strip() for email in emails_copia.split(',') if email.strip()]
+                    if lista_emails:
+                        destinatario_principal = lista_emails[0]  # Primeiro vai para PARA
+                        lista_copia = lista_emails[1:] if len(lista_emails) > 1 else []  # Demais vão para CÓPIAS
+
+                        if lista_copia:
+                            self.logger.info(f"Pedido {numero_pedido}: Cliente NÃO receberá email. Enviando PARA ({destinatario_principal}) e CÓPIAS ({len(lista_copia)} email(s): {', '.join(lista_copia)})")
+                        else:
+                            self.logger.info(f"Pedido {numero_pedido}: Cliente NÃO receberá email. Enviando apenas PARA ({destinatario_principal})")
+                    else:
+                        self.logger.warning(f"Pedido {numero_pedido}: EnviarEmailCliente=0 e EmailsCopia vazio - Nenhum destinatário definido")
+                        return False
+                else:
+                    self.logger.warning(f"Pedido {numero_pedido}: EnviarEmailCliente=0 e EmailsCopia vazio - Nenhum destinatário definido")
+                    return False
+
+            # Montar email
             msg = MIMEMultipart()
             msg['From'] = f"{self.config['EMAIL']['remetente_nome']} <{self.config['EMAIL']['usuario']}>"
-            msg['To'] = destinatario
+            msg['To'] = destinatario_principal
             msg['Subject'] = f"Pedido #{numero_pedido} - {'PDF Atualizado' if eh_reenvio else 'PDF Disponível'}"
-            
-            if emails_copia:
-                lista_copia = [email.strip() for email in emails_copia.split(',') if email.strip()]
-                if lista_copia: msg['Cc'] = ', '.join(lista_copia)
-            
+
+            if lista_copia:
+                msg['Cc'] = ', '.join(lista_copia)
+
             data_atual = datetime.now().strftime("%d/%m/%Y")
             corpo = f"Prezado(a) {nome_cliente},\n\n"
             if eh_reenvio:
@@ -273,7 +307,8 @@ cooldown_tentativa_5_mais = 30
                 corpo += f"Seu pedido #{numero_pedido} foi finalizado com sucesso!\n\n• Pedido em anexo\n• Data da venda: {data_atual}\n• Status: Concluído"
             corpo += f"\n\nObrigado pela sua compra!\n\nAtenciosamente,\n{self.config['EMAIL']['remetente_nome']}"
             msg.attach(MIMEText(corpo.strip(), 'plain', 'utf-8'))
-            
+
+            # Anexar PDF
             with open(caminho_pdf, 'rb') as attachment:
                 part = MIMEBase('application', 'octet-stream')
                 part.set_payload(attachment.read())
@@ -281,19 +316,20 @@ cooldown_tentativa_5_mais = 30
             nome_arquivo = f"Pedido_{numero_pedido}_v{versao_pdf}.pdf" if eh_reenvio else f"Pedido_{numero_pedido}.pdf"
             part.add_header('Content-Disposition', f'attachment; filename= {nome_arquivo}')
             msg.attach(part)
-            
-            todos_destinatarios = [destinatario] + ([e.strip() for e in emails_copia.split(',')] if emails_copia else [])
-            
+
+            # Enviar para todos os destinatários
+            todos_destinatarios = [destinatario_principal] + lista_copia
+
             server = smtplib.SMTP(self.config['EMAIL']['smtp_servidor'], int(self.config['EMAIL']['smtp_porta']))
             server.starttls()
             server.login(self.config['EMAIL']['usuario'], self.config['EMAIL']['senha_app'])
             server.sendmail(self.config['EMAIL']['usuario'], todos_destinatarios, msg.as_string())
             server.quit()
-            
-            self.logger.info(f"{'REENVIO' if eh_reenvio else 'EMAIL'} enviado para {destinatario} - Pedido {numero_pedido}")
+
+            self.logger.info(f"{'REENVIO' if eh_reenvio else 'EMAIL'} enviado com sucesso - Pedido {numero_pedido} - Total de destinatários: {len(todos_destinatarios)}")
             return True
         except Exception as e:
-            self.logger.error(f"Erro ao enviar email para {destinatario}: {e}")
+            self.logger.error(f"Erro ao enviar email - Pedido {numero_pedido}: {e}")
             return False
             
     def processar_pedido(self, pedido):
@@ -304,9 +340,20 @@ cooldown_tentativa_5_mais = 30
         
         try:
             if not self.validacao_geral(pedido): return False
-            
+
             eh_reenvio = (pedido['motivo_processamento'] == "REENVIO_VERSAO_ATUALIZADA")
-            if self.enviar_email(pedido['email_cliente'], pedido['nome_cliente'], numero_pedido, pedido['caminho_pdf'], pedido['emails_copia'], eh_reenvio, pedido['versao_disponivel']):
+            enviar_para_cliente = pedido.get('enviar_email_cliente', 1) == 1  # Converte para boolean
+
+            if self.enviar_email(
+                pedido['email_cliente'],
+                pedido['nome_cliente'],
+                numero_pedido,
+                pedido['caminho_pdf'],
+                pedido['emails_copia'],
+                eh_reenvio,
+                pedido['versao_disponivel'],
+                enviar_para_cliente
+            ):
                 query = "UPDATE ControleEmailPedidos SET StatusProcessamento = 'ENVIADO', EmailEnviado = 1, VersaoPdfEnviada = ?, DataEnvio = GETDATE(), UltimoErro = NULL, TentativasEnvio = 0 WHERE Id = ?"
                 cursor = self.conexao_db.cursor()
                 cursor.execute(query, (pedido['versao_disponivel'], id_controle))
@@ -324,10 +371,20 @@ cooldown_tentativa_5_mais = 30
     def validacao_geral(self, pedido):
         """Agrupa todas as validações de um pedido"""
         numero_pedido = pedido['numero']
-        if not pedido['email_cliente']:
-            self.logger.warning(f"Pedido {numero_pedido}: Cliente sem email.")
+        enviar_para_cliente = pedido.get('enviar_email_cliente', 1) == 1
+
+        # Se deve enviar para cliente, valida se tem email do cliente
+        if enviar_para_cliente and not pedido['email_cliente']:
+            self.logger.warning(f"Pedido {numero_pedido}: EnviarEmailCliente=1 mas cliente sem email cadastrado.")
             self.atualizar_status_pedido(pedido['id'], 'StatusProcessamento', 'ERRO_VALIDACAO', 'Cliente sem email')
             return False
+
+        # Se NÃO deve enviar para cliente, valida se tem emails de cópia
+        if not enviar_para_cliente and not pedido['emails_copia']:
+            self.logger.warning(f"Pedido {numero_pedido}: EnviarEmailCliente=0 mas não há EmailsCopia definidos.")
+            self.atualizar_status_pedido(pedido['id'], 'StatusProcessamento', 'ERRO_VALIDACAO', 'EnviarEmailCliente=0 sem EmailsCopia')
+            return False
+
         return True
 
     def executar_ciclo(self):
