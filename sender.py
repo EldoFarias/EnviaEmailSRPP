@@ -201,7 +201,8 @@ cooldown_tentativa_5_mais = 30
                 (cep.StatusProcessamento = 'PENDENTE' AND cep.EmailEnviado = 0) OR
                 (cep.StatusProcessamento = 'ENVIADO' AND cep.EmailEnviado = 1) OR
                 (cep.StatusProcessamento = 'ERRO_VALIDACAO' AND cep.EmailEnviado = 0) OR
-                (cep.StatusProcessamento = 'INVALIDO' AND cep.EmailEnviado = 0)
+                (cep.StatusProcessamento = 'INVALIDO' AND cep.EmailEnviado = 0) OR
+                (cep.StatusProcessamento = 'ERRO' AND cep.EmailEnviado = 0)
             )
         ORDER BY cep.DataPedidoFechado
         """
@@ -370,16 +371,33 @@ cooldown_tentativa_5_mais = 30
             # Enviar para todos os destinatários
             todos_destinatarios = [destinatario_principal] + lista_copia
 
+            # Conectar ao servidor SMTP
+            self.logger.debug(f"Pedido {numero_pedido}: Conectando ao servidor SMTP {self.config['EMAIL']['smtp_servidor']}:{self.config['EMAIL']['smtp_porta']}")
             server = smtplib.SMTP(self.config['EMAIL']['smtp_servidor'], int(self.config['EMAIL']['smtp_porta']))
             server.starttls()
+            self.logger.debug(f"Pedido {numero_pedido}: Autenticando como {self.config['EMAIL']['usuario']}")
             server.login(self.config['EMAIL']['usuario'], self.config['EMAIL']['senha_app'])
+            self.logger.debug(f"Pedido {numero_pedido}: Enviando email para {len(todos_destinatarios)} destinatário(s)")
             server.sendmail(self.config['EMAIL']['usuario'], todos_destinatarios, msg.as_string())
             server.quit()
 
             self.logger.info(f"{'REENVIO' if eh_reenvio else 'EMAIL'} enviado com sucesso - Pedido {numero_pedido} - Total de destinatários: {len(todos_destinatarios)}")
             return True
+        except OSError as e:
+            # Erros de rede (DNS, conexão, timeout)
+            if 'getaddrinfo failed' in str(e) or '11001' in str(e):
+                self.logger.error(f"Pedido {numero_pedido}: ERRO DE REDE - Falha ao resolver nome do servidor SMTP '{self.config['EMAIL']['smtp_servidor']}'. Verifique sua conexão com a internet.")
+            else:
+                self.logger.error(f"Pedido {numero_pedido}: ERRO DE REDE - {e}")
+            return False
+        except smtplib.SMTPAuthenticationError as e:
+            self.logger.error(f"Pedido {numero_pedido}: ERRO DE AUTENTICAÇÃO - Verifique usuário/senha do email no config.ini - {e}")
+            return False
+        except smtplib.SMTPException as e:
+            self.logger.error(f"Pedido {numero_pedido}: ERRO SMTP - {e}")
+            return False
         except Exception as e:
-            self.logger.error(f"Erro ao enviar email - Pedido {numero_pedido}: {e}")
+            self.logger.error(f"Pedido {numero_pedido}: ERRO INESPERADO ao enviar email - {e}")
             return False
             
     def processar_pedido(self, pedido):
@@ -387,7 +405,7 @@ cooldown_tentativa_5_mais = 30
         id_controle, numero_pedido = pedido['id'], pedido['numero']
         self.logger.info(f"Processando pedido {numero_pedido}...")
         self.atualizar_status_pedido(id_controle, 'StatusProcessamento', 'PROCESSANDO')
-        
+
         try:
             if not self.validacao_geral(pedido): return False
 
@@ -411,11 +429,20 @@ cooldown_tentativa_5_mais = 30
                 self.logger.info(f"SUCESSO ao processar pedido {numero_pedido}")
                 return True
             else:
-                self.atualizar_status_pedido(id_controle, 'StatusProcessamento', 'PENDENTE', 'Erro no envio do email')
+                # Marca como ERRO e garante que EmailEnviado = 0 para retentar no próximo ciclo
+                query = "UPDATE ControleEmailPedidos SET StatusProcessamento = 'ERRO', EmailEnviado = 0, UltimoErro = ?, TentativasEnvio = TentativasEnvio + 1 WHERE Id = ?"
+                cursor = self.conexao_db.cursor()
+                cursor.execute(query, ('Erro no envio do email', id_controle))
+                self.conexao_db.commit()
+                self.logger.warning(f"ERRO ao processar pedido {numero_pedido} - Será retentado no próximo ciclo")
                 return False
         except Exception as e:
             self.logger.error(f"Erro ao processar pedido {numero_pedido}: {e}")
-            self.atualizar_status_pedido(id_controle, 'StatusProcessamento', 'PENDENTE', str(e))
+            # Marca como ERRO e garante que EmailEnviado = 0 para retentar no próximo ciclo
+            query = "UPDATE ControleEmailPedidos SET StatusProcessamento = 'ERRO', EmailEnviado = 0, UltimoErro = ?, TentativasEnvio = TentativasEnvio + 1 WHERE Id = ?"
+            cursor = self.conexao_db.cursor()
+            cursor.execute(query, (str(e)[:500], id_controle))
+            self.conexao_db.commit()
             return False
 
     def validacao_geral(self, pedido):
