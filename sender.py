@@ -40,15 +40,17 @@ class SistemaEnvioEmails:
     def __init__(self, config_path='config.ini'):
         """Inicializa o sistema com configurações"""
         self.config = self.carregar_configuracoes(config_path)
+        self.config_db = None  # Configurações carregadas do banco de dados
         self.setup_logging()
         self.conexao_db = None
         self.excel_logger = None
+        self.carregar_configuracoes_banco()  # Tenta carregar configurações do banco
         self.setup_excel_logging()
         
     def carregar_configuracoes(self, config_path):
-        """Carrega configurações do arquivo INI"""
+        """Carrega configurações do arquivo INI (apenas para conexão inicial ao banco)"""
         config = configparser.ConfigParser()
-        
+
         config_default = r"""
 [SQL_SERVER]
 servidor = 127.0.0.1
@@ -79,15 +81,116 @@ cooldown_tentativa_3 = 10
 cooldown_tentativa_4 = 20
 cooldown_tentativa_5_mais = 30
 """
-        
+
         if not os.path.exists(config_path):
             with open(config_path, 'w', encoding='utf-8') as f:
                 f.write(config_default)
             print(f"Arquivo {config_path} criado. Configure suas credenciais e execute novamente.")
             exit(1)
-            
+
         config.read(config_path, encoding='utf-8')
         return config
+
+    def carregar_configuracoes_banco(self):
+        """Carrega configurações da tabela ConfiguracaoSistemaEmail no banco de dados"""
+        try:
+            # Usa config.ini apenas para conectar ao banco
+            if not self.conectar_banco():
+                self.logger.warning("Não foi possível conectar ao banco para carregar configurações. Usando config.ini como fallback.")
+                return False
+
+            cursor = self.conexao_db.cursor()
+            query = """
+                SELECT TOP 1
+                    SqlServidor, SqlBancoDados, SqlUsuario, SqlSenha, SqlDriver,
+                    PdfsCaminho,
+                    EmailSmtpServidor, EmailSmtpPorta, EmailUsuario, EmailSenhaApp, EmailRemetente,
+                    EmailAssunto, EmailCorpo,
+                    SistemaVerificacaoInicial, SistemaAguardarSegundosAposArquivo,
+                    SistemaVerificacaoPeriodicaAtiva, SistemaVerificacaoPeriodicaMinutos,
+                    SistemaCooldownTentativa1, SistemaCooldownTentativa2, SistemaCooldownTentativa3,
+                    SistemaCooldownTentativa4, SistemaCooldownTentativa5Mais
+                FROM ConfiguracaoSistemaEmail
+                WHERE Ativo = 1
+            """
+            cursor.execute(query)
+            row = cursor.fetchone()
+
+            if row:
+                self.config_db = {
+                    'sql_servidor': row.SqlServidor,
+                    'sql_banco_dados': row.SqlBancoDados,
+                    'sql_usuario': row.SqlUsuario,
+                    'sql_senha': row.SqlSenha,
+                    'sql_driver': row.SqlDriver,
+                    'pdfs_caminho': row.PdfsCaminho,
+                    'email_smtp_servidor': row.EmailSmtpServidor,
+                    'email_smtp_porta': row.EmailSmtpPorta,
+                    'email_usuario': row.EmailUsuario,
+                    'email_senha_app': row.EmailSenhaApp,
+                    'email_remetente': row.EmailRemetente,
+                    'email_assunto': row.EmailAssunto,
+                    'email_corpo': row.EmailCorpo,
+                    'sistema_verificacao_inicial': row.SistemaVerificacaoInicial,
+                    'sistema_aguardar_segundos': row.SistemaAguardarSegundosAposArquivo,
+                    'sistema_verificacao_periodica_ativa': row.SistemaVerificacaoPeriodicaAtiva,
+                    'sistema_verificacao_periodica_minutos': row.SistemaVerificacaoPeriodicaMinutos,
+                    'cooldown_tentativa_1': row.SistemaCooldownTentativa1,
+                    'cooldown_tentativa_2': row.SistemaCooldownTentativa2,
+                    'cooldown_tentativa_3': row.SistemaCooldownTentativa3,
+                    'cooldown_tentativa_4': row.SistemaCooldownTentativa4,
+                    'cooldown_tentativa_5_mais': row.SistemaCooldownTentativa5Mais,
+                }
+                self.logger.info("Configurações carregadas do banco de dados com sucesso!")
+                self.conexao_db.close()
+                self.conexao_db = None
+                return True
+            else:
+                self.logger.warning("Nenhuma configuração ativa encontrada na tabela ConfiguracaoSistemaEmail. Usando config.ini como fallback.")
+                self.conexao_db.close()
+                self.conexao_db = None
+                return False
+
+        except Exception as e:
+            self.logger.warning(f"Erro ao carregar configurações do banco: {e}. Usando config.ini como fallback.")
+            if self.conexao_db:
+                self.conexao_db.close()
+                self.conexao_db = None
+            return False
+
+    def get_config(self, secao, chave, fallback=None):
+        """Obtém configuração do banco ou fallback para config.ini"""
+        if self.config_db:
+            # Mapeia seção/chave do INI para as chaves do dicionário do banco
+            mapa = {
+                ('SQL_SERVER', 'servidor'): 'sql_servidor',
+                ('SQL_SERVER', 'banco_de_dados'): 'sql_banco_dados',
+                ('SQL_SERVER', 'usuario'): 'sql_usuario',
+                ('SQL_SERVER', 'senha'): 'sql_senha',
+                ('SQL_SERVER', 'driver'): 'sql_driver',
+                ('PDFS', 'caminho'): 'pdfs_caminho',
+                ('EMAIL', 'smtp_servidor'): 'email_smtp_servidor',
+                ('EMAIL', 'smtp_porta'): 'email_smtp_porta',
+                ('EMAIL', 'usuario'): 'email_usuario',
+                ('EMAIL', 'senha_app'): 'email_senha_app',
+                ('EMAIL', 'remetente_nome'): 'email_remetente',
+                ('SISTEMA', 'verificacao_inicial'): 'sistema_verificacao_inicial',
+                ('SISTEMA', 'aguardar_segundos_apos_arquivo'): 'sistema_aguardar_segundos',
+                ('SISTEMA', 'verificacao_periodica_ativa'): 'sistema_verificacao_periodica_ativa',
+                ('SISTEMA', 'verificacao_periodica_minutos'): 'sistema_verificacao_periodica_minutos',
+                ('SISTEMA', 'cooldown_tentativa_1'): 'cooldown_tentativa_1',
+                ('SISTEMA', 'cooldown_tentativa_2'): 'cooldown_tentativa_2',
+                ('SISTEMA', 'cooldown_tentativa_3'): 'cooldown_tentativa_3',
+                ('SISTEMA', 'cooldown_tentativa_4'): 'cooldown_tentativa_4',
+                ('SISTEMA', 'cooldown_tentativa_5_mais'): 'cooldown_tentativa_5_mais',
+            }
+
+            chave_db = mapa.get((secao, chave))
+            if chave_db and chave_db in self.config_db:
+                return self.config_db[chave_db]
+
+        # Fallback para config.ini
+        return self.config.get(secao, chave, fallback=fallback)
         
     def setup_logging(self):
         """Configura sistema de logs"""
@@ -133,7 +236,7 @@ cooldown_tentativa_5_mais = 30
         """Estabelece conexão com SQL Server com fallback automático de drivers"""
         # Lista de drivers ODBC em ordem de preferência (mais recente para mais antigo)
         drivers_disponiveis = [
-            self.config['SQL_SERVER']['driver'],  # Driver configurado pelo usuário (prioridade)
+            self.get_config('SQL_SERVER', 'driver'),  # Driver configurado (prioridade)
             'ODBC Driver 18 for SQL Server',
             'ODBC Driver 17 for SQL Server',
             'ODBC Driver 13.1 for SQL Server',
@@ -151,22 +254,23 @@ cooldown_tentativa_5_mais = 30
                 drivers_unicos.append(driver)
 
         erros_tentativas = []
+        driver_configurado = self.get_config('SQL_SERVER', 'driver')
 
         for driver in drivers_unicos:
             try:
                 conn_str = (
                     f"DRIVER={{{driver}}};"
-                    f"SERVER={self.config['SQL_SERVER']['servidor']};"
-                    f"DATABASE={self.config['SQL_SERVER']['banco_de_dados']};"
-                    f"UID={self.config['SQL_SERVER']['usuario']};"
-                    f"PWD={self.config['SQL_SERVER']['senha']};"
+                    f"SERVER={self.get_config('SQL_SERVER', 'servidor')};"
+                    f"DATABASE={self.get_config('SQL_SERVER', 'banco_de_dados')};"
+                    f"UID={self.get_config('SQL_SERVER', 'usuario')};"
+                    f"PWD={self.get_config('SQL_SERVER', 'senha')};"
                 )
                 self.conexao_db = pyodbc.connect(conn_str)
                 self.logger.info(f"Conectado ao banco de dados com sucesso usando driver: {driver}")
 
                 # Se conectou com driver diferente do configurado, avisar
-                if driver != self.config['SQL_SERVER']['driver']:
-                    self.logger.warning(f"Driver configurado '{self.config['SQL_SERVER']['driver']}' não disponível. Usando '{driver}' como alternativa.")
+                if driver != driver_configurado:
+                    self.logger.warning(f"Driver configurado '{driver_configurado}' não disponível. Usando '{driver}' como alternativa.")
 
                 return True
 
@@ -258,11 +362,11 @@ cooldown_tentativa_5_mais = 30
     def _calcular_cooldown(self, tentativas):
         """Calcula tempo de cool-down progressivo"""
         try:
-            if tentativas <= 1: return int(self.config.get('SISTEMA', 'cooldown_tentativa_1', fallback=2))
-            elif tentativas == 2: return int(self.config.get('SISTEMA', 'cooldown_tentativa_2', fallback=5))
-            elif tentativas == 3: return int(self.config.get('SISTEMA', 'cooldown_tentativa_3', fallback=10))
-            elif tentativas == 4: return int(self.config.get('SISTEMA', 'cooldown_tentativa_4', fallback=20))
-            else: return int(self.config.get('SISTEMA', 'cooldown_tentativa_5_mais', fallback=30))
+            if tentativas <= 1: return int(self.get_config('SISTEMA', 'cooldown_tentativa_1', fallback=2))
+            elif tentativas == 2: return int(self.get_config('SISTEMA', 'cooldown_tentativa_2', fallback=5))
+            elif tentativas == 3: return int(self.get_config('SISTEMA', 'cooldown_tentativa_3', fallback=10))
+            elif tentativas == 4: return int(self.get_config('SISTEMA', 'cooldown_tentativa_4', fallback=20))
+            else: return int(self.get_config('SISTEMA', 'cooldown_tentativa_5_mais', fallback=30))
         except:
             if tentativas <= 1: return 2
             elif tentativas == 2: return 5
@@ -272,7 +376,7 @@ cooldown_tentativa_5_mais = 30
         
     def buscar_pdf_pedido(self, numero_pedido):
         """Busca e identifica a versão mais recente do PDF"""
-        caminho_pdfs = self.config['PDFS']['caminho']
+        caminho_pdfs = self.get_config('PDFS', 'caminho')
         padrao = f"PEDIDO {str(numero_pedido).zfill(7)}*.pdf"
         arquivos = glob.glob(os.path.join(caminho_pdfs, padrao))
         
@@ -305,8 +409,8 @@ cooldown_tentativa_5_mais = 30
         except Exception as e:
             self.logger.error(f"Erro ao atualizar status do pedido {id_controle}: {e}")
             
-    def enviar_email(self, destinatario, nome_cliente, numero_pedido, caminho_pdf, emails_copia=None, eh_reenvio=False, versao_pdf=1, enviar_para_cliente=True):
-        """Envia email com PDF anexo"""
+    def enviar_email(self, destinatario, nome_cliente, numero_pedido, caminho_pdf, emails_copia=None, eh_reenvio=False, versao_pdf=1, enviar_para_cliente=True, data_pedido_fechado=None):
+        """Envia email com PDF anexo usando templates do banco de dados"""
         try:
             # Determinar destinatários baseado em enviar_para_cliente
             destinatario_principal = None
@@ -341,22 +445,55 @@ cooldown_tentativa_5_mais = 30
                     self.logger.warning(f"Pedido {numero_pedido}: EnviarEmailCliente=0 e EmailsCopia vazio - Nenhum destinatário definido")
                     return False
 
+            # Obter templates do banco de dados ou usar padrões
+            assunto_template = self.config_db.get('email_assunto') if self.config_db else 'Pedido {NroPedido} - PDF Anexado'
+            corpo_template = self.config_db.get('email_corpo') if self.config_db else """Prezado(a) {RazaoSocial},
+
+Segue em anexo o PDF do seu pedido número {NroPedido}.
+
+{MensagemReenvio}
+
+Atenciosamente,
+Equipe SRPP"""
+
+            # Preparar variáveis para substituição
+            data_formatada = data_pedido_fechado.strftime("%d/%m/%Y") if data_pedido_fechado else datetime.now().strftime("%d/%m/%Y")
+
+            # Mensagem de reenvio
+            if eh_reenvio:
+                mensagem_reenvio = f"ATENÇÃO: Esta é uma versão atualizada do pedido (versão {versao_pdf}).\nEsta versão substitui a anterior."
+            else:
+                mensagem_reenvio = ""
+
+            # Substituir variáveis no assunto
+            assunto = assunto_template.format(
+                NroPedido=numero_pedido,
+                RazaoSocial=nome_cliente,
+                DataPedidoFechado=data_formatada,
+                VersaoPdf=versao_pdf,
+                MensagemReenvio=mensagem_reenvio
+            )
+
+            # Substituir variáveis no corpo
+            corpo = corpo_template.format(
+                NroPedido=numero_pedido,
+                RazaoSocial=nome_cliente,
+                DataPedidoFechado=data_formatada,
+                VersaoPdf=versao_pdf,
+                MensagemReenvio=mensagem_reenvio
+            )
+
             # Montar email
             msg = MIMEMultipart()
-            msg['From'] = f"{self.config['EMAIL']['remetente_nome']} <{self.config['EMAIL']['usuario']}>"
+            remetente_nome = self.get_config('EMAIL', 'remetente_nome', fallback='Sistema SRPP')
+            email_usuario = self.get_config('EMAIL', 'usuario')
+            msg['From'] = f"{remetente_nome} <{email_usuario}>"
             msg['To'] = destinatario_principal
-            msg['Subject'] = f"Pedido #{numero_pedido} - {'PDF Atualizado' if eh_reenvio else 'PDF Disponível'}"
+            msg['Subject'] = assunto
 
             if lista_copia:
                 msg['Cc'] = ', '.join(lista_copia)
 
-            data_atual = datetime.now().strftime("%d/%m/%Y")
-            corpo = f"Prezado(a) {nome_cliente},\n\n"
-            if eh_reenvio:
-                corpo += f"Seu pedido #{numero_pedido} teve informações atualizadas.\n\n• Nova versão do pedido em anexo\n• Versão: {versao_pdf}\n• Atualizado em: {data_atual}\n\nEsta versão substitui a anterior."
-            else:
-                corpo += f"Seu pedido #{numero_pedido} foi finalizado com sucesso!\n\n• Pedido em anexo\n• Data da venda: {data_atual}\n• Status: Concluído"
-            corpo += f"\n\nObrigado pela sua compra!\n\nAtenciosamente,\n{self.config['EMAIL']['remetente_nome']}"
             msg.attach(MIMEText(corpo.strip(), 'plain', 'utf-8'))
 
             # Anexar PDF
@@ -372,26 +509,30 @@ cooldown_tentativa_5_mais = 30
             todos_destinatarios = [destinatario_principal] + lista_copia
 
             # Conectar ao servidor SMTP
-            self.logger.debug(f"Pedido {numero_pedido}: Conectando ao servidor SMTP {self.config['EMAIL']['smtp_servidor']}:{self.config['EMAIL']['smtp_porta']}")
-            server = smtplib.SMTP(self.config['EMAIL']['smtp_servidor'], int(self.config['EMAIL']['smtp_porta']))
+            smtp_servidor = self.get_config('EMAIL', 'smtp_servidor')
+            smtp_porta = int(self.get_config('EMAIL', 'smtp_porta', fallback=587))
+            self.logger.debug(f"Pedido {numero_pedido}: Conectando ao servidor SMTP {smtp_servidor}:{smtp_porta}")
+            server = smtplib.SMTP(smtp_servidor, smtp_porta)
             server.starttls()
-            self.logger.debug(f"Pedido {numero_pedido}: Autenticando como {self.config['EMAIL']['usuario']}")
-            server.login(self.config['EMAIL']['usuario'], self.config['EMAIL']['senha_app'])
+            self.logger.debug(f"Pedido {numero_pedido}: Autenticando como {email_usuario}")
+            senha_app = self.get_config('EMAIL', 'senha_app')
+            server.login(email_usuario, senha_app)
             self.logger.debug(f"Pedido {numero_pedido}: Enviando email para {len(todos_destinatarios)} destinatário(s)")
-            server.sendmail(self.config['EMAIL']['usuario'], todos_destinatarios, msg.as_string())
+            server.sendmail(email_usuario, todos_destinatarios, msg.as_string())
             server.quit()
 
             self.logger.info(f"{'REENVIO' if eh_reenvio else 'EMAIL'} enviado com sucesso - Pedido {numero_pedido} - Total de destinatários: {len(todos_destinatarios)}")
             return True
         except OSError as e:
             # Erros de rede (DNS, conexão, timeout)
+            smtp_servidor = self.get_config('EMAIL', 'smtp_servidor', fallback='servidor_smtp')
             if 'getaddrinfo failed' in str(e) or '11001' in str(e):
-                self.logger.error(f"Pedido {numero_pedido}: ERRO DE REDE - Falha ao resolver nome do servidor SMTP '{self.config['EMAIL']['smtp_servidor']}'. Verifique sua conexão com a internet.")
+                self.logger.error(f"Pedido {numero_pedido}: ERRO DE REDE - Falha ao resolver nome do servidor SMTP '{smtp_servidor}'. Verifique sua conexão com a internet.")
             else:
                 self.logger.error(f"Pedido {numero_pedido}: ERRO DE REDE - {e}")
             return False
         except smtplib.SMTPAuthenticationError as e:
-            self.logger.error(f"Pedido {numero_pedido}: ERRO DE AUTENTICAÇÃO - Verifique usuário/senha do email no config.ini - {e}")
+            self.logger.error(f"Pedido {numero_pedido}: ERRO DE AUTENTICAÇÃO - Verifique usuário/senha do email - {e}")
             return False
         except smtplib.SMTPException as e:
             self.logger.error(f"Pedido {numero_pedido}: ERRO SMTP - {e}")
@@ -420,7 +561,8 @@ cooldown_tentativa_5_mais = 30
                 pedido['emails_copia'],
                 eh_reenvio,
                 pedido['versao_disponivel'],
-                enviar_para_cliente
+                enviar_para_cliente,
+                pedido['data_fechamento']
             ):
                 query = "UPDATE ControleEmailPedidos SET StatusProcessamento = 'ENVIADO', EmailEnviado = 1, VersaoPdfEnviada = ?, DataEnvio = GETDATE(), UltimoErro = NULL, TentativasEnvio = 0 WHERE Id = ?"
                 cursor = self.conexao_db.cursor()
@@ -558,7 +700,7 @@ class PDFEventHandler(FileSystemEventHandler):
     """Handler para monitorar eventos de arquivos PDF"""
     def __init__(self, sistema_emails):
         self.sistema_emails = sistema_emails
-        self.aguardar_segundos = int(sistema_emails.config.get('SISTEMA', 'aguardar_segundos_apos_arquivo', fallback=5))
+        self.aguardar_segundos = int(sistema_emails.get_config('SISTEMA', 'aguardar_segundos_apos_arquivo', fallback=5))
         self.logger = sistema_emails.logger
         
     def on_created(self, event):
@@ -591,10 +733,13 @@ def main():
             return
 
         print("Sistema de Envio de Emails iniciado!")
-        caminho_pdfs = sistema.config['PDFS']['caminho']
+        caminho_pdfs = sistema.get_config('PDFS', 'caminho')
         print(f"Monitorando pasta: {caminho_pdfs}")
-        
-        if sistema.config.getboolean('SISTEMA', 'verificacao_inicial'):
+
+        verificacao_inicial = sistema.get_config('SISTEMA', 'verificacao_inicial', fallback=True)
+        if isinstance(verificacao_inicial, str):
+            verificacao_inicial = verificacao_inicial.lower() in ('true', '1', 'yes')
+        if verificacao_inicial:
             print("Executando verificação inicial...")
             sistema.executar_ciclo()
 
