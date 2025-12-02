@@ -25,7 +25,7 @@ echo ========================================
 echo.
 echo [3a/3] Compilando versao de PRODUCAO (background, sem console)...
 
-pyinstaller --onefile ^
+python -m PyInstaller --onefile ^
     --name EnviaEmailSRPP ^
     --noconsole ^
     --hidden-import pyodbc ^
@@ -55,7 +55,7 @@ echo ========================================
 echo.
 echo [3b/3] Compilando versao de DEBUG (com console para logs)...
 
-pyinstaller --onefile ^
+python -m PyInstaller --onefile ^
     --name EnviaEmailSRPP_Debug ^
     --console ^
     --hidden-import pyodbc ^
