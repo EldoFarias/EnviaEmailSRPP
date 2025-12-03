@@ -11,7 +11,6 @@ import glob
 import smtplib
 import logging
 import pyodbc
-import configparser
 import time
 import signal
 import sys
@@ -37,66 +36,29 @@ from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
 
 class SistemaEnvioEmails:
-    def __init__(self, config_path='config.ini'):
+    def __init__(self):
         """Inicializa o sistema com configurações"""
-        self.config = self.carregar_configuracoes(config_path)
+        # Configurações de conexão SQL embutidas (não mudam nunca)
+        self.sql_config = {
+            'servidor': '127.0.0.1',
+            'banco_de_dados': 'SRPP',
+            'usuario': 'sa',
+            'senha': 'M4573R',
+            'driver_preferencial': 'ODBC Driver 17 for SQL Server'
+        }
         self.config_db = None  # Configurações carregadas do banco de dados
         self.setup_logging()
         self.conexao_db = None
         self.excel_logger = None
         self.carregar_configuracoes_banco()  # Tenta carregar configurações do banco
         self.setup_excel_logging()
-        
-    def carregar_configuracoes(self, config_path):
-        """Carrega configurações do arquivo INI (apenas para conexão inicial ao banco)"""
-        config = configparser.ConfigParser()
-
-        config_default = r"""
-[SQL_SERVER]
-servidor = 127.0.0.1
-banco_de_dados = SRPP
-usuario = sa
-senha = M4573R
-driver = ODBC Driver 17 for SQL Server
-
-[PDFS]
-caminho = C:\Users\Public\Documents\SRPP\PDFs
-
-[EMAIL]
-smtp_servidor = smtp-mail.outlook.com
-smtp_porta = 587
-usuario = seu_email@empresa.com
-senha_app = sua_senha_app_aqui
-remetente_nome = Sistema de Vendas
-
-[SISTEMA]
-verificacao_inicial = True
-aguardar_segundos_apos_arquivo = 5
-verificacao_periodica_ativa = True
-verificacao_periodica_minutos = 10
-max_tentativas = DESABILITADO_USA_COOLDOWN
-cooldown_tentativa_1 = 2
-cooldown_tentativa_2 = 5
-cooldown_tentativa_3 = 10
-cooldown_tentativa_4 = 20
-cooldown_tentativa_5_mais = 30
-"""
-
-        if not os.path.exists(config_path):
-            with open(config_path, 'w', encoding='utf-8') as f:
-                f.write(config_default)
-            print(f"Arquivo {config_path} criado. Configure suas credenciais e execute novamente.")
-            exit(1)
-
-        config.read(config_path, encoding='utf-8')
-        return config
 
     def carregar_configuracoes_banco(self):
         """Carrega configurações da tabela ConfiguracaoSistemaEmail no banco de dados"""
         try:
-            # Usa config.ini apenas para conectar ao banco
+            # Conecta ao banco usando credenciais embutidas
             if not self.conectar_banco():
-                self.logger.warning("Não foi possível conectar ao banco para carregar configurações. Usando config.ini como fallback.")
+                self.logger.error("ERRO CRÍTICO: Não foi possível conectar ao banco de dados. Verifique se o SQL Server está acessível.")
                 return False
 
             cursor = self.conexao_db.cursor()
@@ -146,51 +108,49 @@ cooldown_tentativa_5_mais = 30
                 self.conexao_db = None
                 return True
             else:
-                self.logger.warning("Nenhuma configuração ativa encontrada na tabela ConfiguracaoSistemaEmail. Usando config.ini como fallback.")
+                self.logger.error("ERRO CRÍTICO: Nenhuma configuração ativa encontrada na tabela ConfiguracaoSistemaEmail.")
+                self.logger.error("SOLUÇÃO: Execute o script SQL 'criar_tabela_configuracoes.sql' para criar a tabela.")
                 self.conexao_db.close()
                 self.conexao_db = None
                 return False
 
         except Exception as e:
-            self.logger.warning(f"Erro ao carregar configurações do banco: {e}. Usando config.ini como fallback.")
+            self.logger.error(f"ERRO ao carregar configurações do banco: {e}")
             if self.conexao_db:
                 self.conexao_db.close()
                 self.conexao_db = None
             return False
 
     def get_config(self, secao, chave, fallback=None):
-        """Obtém configuração do banco ou fallback para config.ini"""
-        if self.config_db:
-            # Mapeia seção/chave do INI para as chaves do dicionário do banco
-            mapa = {
-                ('SQL_SERVER', 'servidor'): 'sql_servidor',
-                ('SQL_SERVER', 'banco_de_dados'): 'sql_banco_dados',
-                ('SQL_SERVER', 'usuario'): 'sql_usuario',
-                ('SQL_SERVER', 'senha'): 'sql_senha',
-                ('SQL_SERVER', 'driver'): 'sql_driver',
-                ('PDFS', 'caminho'): 'pdfs_caminho',
-                ('EMAIL', 'smtp_servidor'): 'email_smtp_servidor',
-                ('EMAIL', 'smtp_porta'): 'email_smtp_porta',
-                ('EMAIL', 'usuario'): 'email_usuario',
-                ('EMAIL', 'senha_app'): 'email_senha_app',
-                ('EMAIL', 'remetente_nome'): 'email_remetente',
-                ('SISTEMA', 'verificacao_inicial'): 'sistema_verificacao_inicial',
-                ('SISTEMA', 'aguardar_segundos_apos_arquivo'): 'sistema_aguardar_segundos',
-                ('SISTEMA', 'verificacao_periodica_ativa'): 'sistema_verificacao_periodica_ativa',
-                ('SISTEMA', 'verificacao_periodica_minutos'): 'sistema_verificacao_periodica_minutos',
-                ('SISTEMA', 'cooldown_tentativa_1'): 'cooldown_tentativa_1',
-                ('SISTEMA', 'cooldown_tentativa_2'): 'cooldown_tentativa_2',
-                ('SISTEMA', 'cooldown_tentativa_3'): 'cooldown_tentativa_3',
-                ('SISTEMA', 'cooldown_tentativa_4'): 'cooldown_tentativa_4',
-                ('SISTEMA', 'cooldown_tentativa_5_mais'): 'cooldown_tentativa_5_mais',
-            }
+        """Obtém configuração do banco de dados"""
+        if not self.config_db:
+            self.logger.error(f"ERRO: Tentativa de obter configuração '{secao}.{chave}' mas config_db não está carregado!")
+            return fallback
 
-            chave_db = mapa.get((secao, chave))
-            if chave_db and chave_db in self.config_db:
-                return self.config_db[chave_db]
+        # Mapeia seção/chave para as chaves do dicionário do banco
+        mapa = {
+            ('PDFS', 'caminho'): 'pdfs_caminho',
+            ('EMAIL', 'smtp_servidor'): 'email_smtp_servidor',
+            ('EMAIL', 'smtp_porta'): 'email_smtp_porta',
+            ('EMAIL', 'usuario'): 'email_usuario',
+            ('EMAIL', 'senha_app'): 'email_senha_app',
+            ('EMAIL', 'remetente_nome'): 'email_remetente',
+            ('SISTEMA', 'verificacao_inicial'): 'sistema_verificacao_inicial',
+            ('SISTEMA', 'aguardar_segundos_apos_arquivo'): 'sistema_aguardar_segundos',
+            ('SISTEMA', 'verificacao_periodica_ativa'): 'sistema_verificacao_periodica_ativa',
+            ('SISTEMA', 'verificacao_periodica_minutos'): 'sistema_verificacao_periodica_minutos',
+            ('SISTEMA', 'cooldown_tentativa_1'): 'cooldown_tentativa_1',
+            ('SISTEMA', 'cooldown_tentativa_2'): 'cooldown_tentativa_2',
+            ('SISTEMA', 'cooldown_tentativa_3'): 'cooldown_tentativa_3',
+            ('SISTEMA', 'cooldown_tentativa_4'): 'cooldown_tentativa_4',
+            ('SISTEMA', 'cooldown_tentativa_5_mais'): 'cooldown_tentativa_5_mais',
+        }
 
-        # Fallback para config.ini
-        return self.config.get(secao, chave, fallback=fallback)
+        chave_db = mapa.get((secao, chave))
+        if chave_db and chave_db in self.config_db:
+            return self.config_db[chave_db]
+
+        return fallback
         
     def setup_logging(self):
         """Configura sistema de logs"""
@@ -236,7 +196,7 @@ cooldown_tentativa_5_mais = 30
         """Estabelece conexão com SQL Server com fallback automático de drivers"""
         # Lista de drivers ODBC em ordem de preferência (mais recente para mais antigo)
         drivers_disponiveis = [
-            self.get_config('SQL_SERVER', 'driver'),  # Driver configurado (prioridade)
+            self.sql_config['driver_preferencial'],  # Driver preferencial
             'ODBC Driver 18 for SQL Server',
             'ODBC Driver 17 for SQL Server',
             'ODBC Driver 13.1 for SQL Server',
@@ -254,23 +214,23 @@ cooldown_tentativa_5_mais = 30
                 drivers_unicos.append(driver)
 
         erros_tentativas = []
-        driver_configurado = self.get_config('SQL_SERVER', 'driver')
+        driver_preferencial = self.sql_config['driver_preferencial']
 
         for driver in drivers_unicos:
             try:
                 conn_str = (
                     f"DRIVER={{{driver}}};"
-                    f"SERVER={self.get_config('SQL_SERVER', 'servidor')};"
-                    f"DATABASE={self.get_config('SQL_SERVER', 'banco_de_dados')};"
-                    f"UID={self.get_config('SQL_SERVER', 'usuario')};"
-                    f"PWD={self.get_config('SQL_SERVER', 'senha')};"
+                    f"SERVER={self.sql_config['servidor']};"
+                    f"DATABASE={self.sql_config['banco_de_dados']};"
+                    f"UID={self.sql_config['usuario']};"
+                    f"PWD={self.sql_config['senha']};"
                 )
                 self.conexao_db = pyodbc.connect(conn_str)
                 self.logger.info(f"Conectado ao banco de dados com sucesso usando driver: {driver}")
 
-                # Se conectou com driver diferente do configurado, avisar
-                if driver != driver_configurado:
-                    self.logger.warning(f"Driver configurado '{driver_configurado}' não disponível. Usando '{driver}' como alternativa.")
+                # Se conectou com driver diferente do preferencial, avisar
+                if driver != driver_preferencial:
+                    self.logger.warning(f"Driver preferencial '{driver_preferencial}' não disponível. Usando '{driver}' como alternativa.")
 
                 return True
 
