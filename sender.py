@@ -67,7 +67,7 @@ class SistemaEnvioEmails:
                     SqlServidor, SqlBancoDados, SqlUsuario, SqlSenha, SqlDriver,
                     PdfsCaminho,
                     EmailSmtpServidor, EmailSmtpPorta, EmailUsuario, EmailSenhaApp, EmailRemetente,
-                    EmailAssunto, EmailCorpo,
+                    EmailAssunto, EmailCorpo, EmailResponderPara,
                     SistemaVerificacaoInicial, SistemaAguardarSegundosAposArquivo,
                     SistemaVerificacaoPeriodicaAtiva, SistemaVerificacaoPeriodicaMinutos,
                     SistemaCooldownTentativa1, SistemaCooldownTentativa2, SistemaCooldownTentativa3,
@@ -93,6 +93,7 @@ class SistemaEnvioEmails:
                     'email_remetente': row.EmailRemetente,
                     'email_assunto': row.EmailAssunto,
                     'email_corpo': row.EmailCorpo,
+                    'email_responder_para': row.EmailResponderPara,
                     'sistema_verificacao_inicial': row.SistemaVerificacaoInicial,
                     'sistema_aguardar_segundos': row.SistemaAguardarSegundosAposArquivo,
                     'sistema_verificacao_periodica_ativa': row.SistemaVerificacaoPeriodicaAtiva,
@@ -135,6 +136,7 @@ class SistemaEnvioEmails:
             ('EMAIL', 'usuario'): 'email_usuario',
             ('EMAIL', 'senha_app'): 'email_senha_app',
             ('EMAIL', 'remetente_nome'): 'email_remetente',
+            ('EMAIL', 'reply_to'): 'email_responder_para',
             ('SISTEMA', 'verificacao_inicial'): 'sistema_verificacao_inicial',
             ('SISTEMA', 'aguardar_segundos_apos_arquivo'): 'sistema_aguardar_segundos',
             ('SISTEMA', 'verificacao_periodica_ativa'): 'sistema_verificacao_periodica_ativa',
@@ -450,6 +452,12 @@ Equipe SRPP"""
             msg['From'] = f"{remetente_nome} <{email_usuario}>"
             msg['To'] = destinatario_principal
             msg['Subject'] = assunto
+
+            # Configurar Reply-To se estiver definido no banco
+            email_reply_to = self.get_config('EMAIL', 'reply_to')
+            if email_reply_to:
+                msg['Reply-To'] = email_reply_to
+                self.logger.debug(f"Pedido {numero_pedido}: Reply-To configurado para {email_reply_to}")
 
             if lista_copia:
                 msg['Cc'] = ', '.join(lista_copia)
