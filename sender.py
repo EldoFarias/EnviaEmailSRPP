@@ -449,7 +449,15 @@ Equipe SRPP"""
             msg = MIMEMultipart()
             remetente_nome = self.get_config('EMAIL', 'remetente_nome', fallback='Sistema SRPP')
             email_usuario = self.get_config('EMAIL', 'usuario')
-            msg['From'] = f"{remetente_nome} <{email_usuario}>"
+
+            # Usar EmailRemetente do banco ou montar com nome + email
+            if remetente_nome and remetente_nome != 'Sistema SRPP':
+                # Se EmailRemetente está preenchido no banco, usa ele diretamente
+                msg['From'] = f"{remetente_nome} <{email_usuario}>"
+            else:
+                # Se não, usa o padrão
+                msg['From'] = f"Sistema SRPP <{email_usuario}>"
+
             msg['To'] = destinatario_principal
             msg['Subject'] = assunto
 
