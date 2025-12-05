@@ -418,12 +418,30 @@ Segue em anexo o PDF do seu pedido número {NroPedido}.
 Atenciosamente,
 Equipe SRPP"""
 
+            # Detectar tipo de conteúdo (HTML ou TEXTO) e processar corpo
+            tipo_conteudo = 'plain'  # Padrão é texto simples
+            linhas = corpo_template.split('\n')
+
+            if linhas and linhas[0].strip().upper() in ('#HTML', '#TEXTO'):
+                tipo_marcador = linhas[0].strip().upper()
+                # Remove a primeira linha (marcador) do template
+                corpo_template = '\n'.join(linhas[1:])
+
+                if tipo_marcador == '#HTML':
+                    tipo_conteudo = 'html'
+                    self.logger.debug(f"Pedido {numero_pedido}: Email será enviado como HTML")
+                else:
+                    self.logger.debug(f"Pedido {numero_pedido}: Email será enviado como TEXTO")
+
             # Preparar variáveis para substituição
             data_formatada = data_pedido_fechado.strftime("%d/%m/%Y") if data_pedido_fechado else datetime.now().strftime("%d/%m/%Y")
 
             # Mensagem de reenvio
             if eh_reenvio:
-                mensagem_reenvio = f"ATENÇÃO: Esta é uma versão atualizada do pedido (versão {versao_pdf}).\nEsta versão substitui a anterior."
+                if tipo_conteudo == 'html':
+                    mensagem_reenvio = f"<strong>ATENÇÃO:</strong> Esta é uma versão atualizada do pedido (versão {versao_pdf}).<br>Esta versão substitui a anterior."
+                else:
+                    mensagem_reenvio = f"ATENÇÃO: Esta é uma versão atualizada do pedido (versão {versao_pdf}).\nEsta versão substitui a anterior."
             else:
                 mensagem_reenvio = ""
 
@@ -471,7 +489,7 @@ Equipe SRPP"""
             if lista_copia:
                 msg['Cc'] = ', '.join(lista_copia)
 
-            msg.attach(MIMEText(corpo.strip(), 'plain', 'utf-8'))
+            msg.attach(MIMEText(corpo.strip(), tipo_conteudo, 'utf-8'))
 
             # Anexar PDF
             with open(caminho_pdf, 'rb') as attachment:
