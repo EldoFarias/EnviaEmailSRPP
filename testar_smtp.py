@@ -1,95 +1,74 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Script de teste rápido de autenticação SMTP
+Script de teste completo SMTP para Gmail, Outlook, Office365 e servidores comuns
 """
 
 import smtplib
+import ssl
 import sys
 
-def testar_smtp(email, senha):
-    """Testa autenticação SMTP do Gmail"""
-    print("=" * 60)
-    print("TESTE DE AUTENTICAÇÃO SMTP - GMAIL")
-    print("=" * 60)
-    print(f"\nEmail: {email}")
-    print(f"Senha App: {senha[:4]}{'*' * (len(senha) - 4)}")
-    print("\nTestando conexão...\n")
+# Lista de servidores para testar
+SERVIDORES = [
+    {"nome": "Gmail", "host": "smtp.gmail.com", "port": 587, "ssl": False},
+    {"nome": "Gmail SSL", "host": "smtp.gmail.com", "port": 465, "ssl": True},
+
+    {"nome": "Outlook/Hotmail/Office365", "host": "smtp.office365.com", "port": 587, "ssl": False},
+    {"nome": "Outlook SSL", "host": "smtp-mail.outlook.com", "port": 465, "ssl": True},
+
+    # SMTP genéricos comuns
+    {"nome": "SMTP Genérico TLS", "host": None, "port": 587, "ssl": False},
+    {"nome": "SMTP Genérico SSL", "host": None, "port": 465, "ssl": True},
+]
+
+def testar(email, senha, host, port, usar_ssl):
+    print(f"\n=== Testando {host}:{port} / SSL={usar_ssl} ===")
 
     try:
-        # Conectar ao servidor Gmail
-        print("1. Conectando ao smtp.gmail.com:587...")
-        server = smtplib.SMTP('smtp.gmail.com', 587)
-        print("   [OK] Conectado com sucesso!\n")
+        if usar_ssl:
+            contexto = ssl.create_default_context()
+            server = smtplib.SMTP_SSL(host, port, context=contexto)
+        else:
+            server = smtplib.SMTP(host, port)
+            server.starttls()
 
-        # Iniciar TLS
-        print("2. Iniciando conexao segura TLS...")
-        server.starttls()
-        print("   [OK] TLS ativado!\n")
-
-        # Tentar autenticar
-        print("3. Tentando autenticar...")
         server.login(email, senha)
-        print("   [OK] AUTENTICACAO BEM-SUCEDIDA!\n")
-
-        # Fechar conexão
         server.quit()
 
-        print("=" * 60)
-        print("[OK] TESTE CONCLUIDO COM SUCESSO!")
-        print("=" * 60)
-        print("\nAs credenciais estao corretas e funcionando.")
-        print("O email pode ser enviado normalmente com essas configuracoes.\n")
+        print(f"[SUCESSO] Autenticado com sucesso em {host}:{port} (SSL={usar_ssl})")
         return True
 
     except smtplib.SMTPAuthenticationError as e:
-        print("   [ERRO] ERRO DE AUTENTICACAO!\n")
-        print("=" * 60)
-        print("[ERRO] FALHA NA AUTENTICACAO")
-        print("=" * 60)
-        print("\nPossiveis causas:")
-        print("1. Senha de app incorreta ou invalida")
-        print("2. Senha de app foi revogada no Google")
-        print("3. Email nao tem autenticacao de 2 fatores ativada")
-        print("4. Email/senha digitados com espacos extras")
-        print("5. Dominio sint.com.br nao esta configurado corretamente no Google Workspace")
-        print("\nComo resolver:")
-        print("1. Verifique se o dominio sint.com.br esta usando Google Workspace")
-        print("2. Se sim, acesse: https://myaccount.google.com/apppasswords")
-        print("3. Gere uma nova senha de app")
-        print("4. Use a senha de 16 caracteres sem espacos")
-        print(f"\nDetalhes do erro: {e}\n")
-        return False
-
-    except smtplib.SMTPException as e:
-        print("   [ERRO] ERRO SMTP!\n")
-        print("=" * 60)
-        print("[ERRO] ERRO NO SERVIDOR SMTP")
-        print("=" * 60)
-        print(f"\nDetalhes: {e}\n")
+        print(f"[ERRO] Falha de autenticação: {e}")
         return False
 
     except Exception as e:
-        print("   [ERRO] ERRO INESPERADO!\n")
-        print("=" * 60)
-        print("[ERRO] ERRO INESPERADO")
-        print("=" * 60)
-        print(f"\nDetalhes: {e}\n")
+        print(f"[ERRO] Não conectou ou falhou: {e}")
         return False
 
+
 if __name__ == "__main__":
-    # Credenciais para teste
-    email = "eldofarias81@gmail.com"
-    senha = "usyhuizdzprbxvkf"
+    # PREENCHA AQUI
+    email = "nao-responda@sint.com.br"
+    senha = "vdvmnfblzxvccqhw"
 
-    # Remover espaços da senha (senhas de app do Gmail não tem espaços)
-    senha_limpa = senha.replace(" ", "")
+    dominio = email.split("@")[1]
 
-    print("\nNOTA: Removendo espaços da senha de app...")
-    print(f"Senha original: '{senha}'")
-    print(f"Senha sem espaços: '{senha_limpa}'\n")
+    print("\n################################################")
+    print(" INICIANDO TESTE COMPLETO DE SERVIDORES SMTP")
+    print("################################################")
+    print(f"E-mail: {email}")
+    print(f"Dominio detectado: {dominio}")
+    print("------------------------------------------------\n")
 
-    # Testar
-    sucesso = testar_smtp(email, senha_limpa)
+    senha = senha.replace(" ", "")
 
-    sys.exit(0 if sucesso else 1)
+    for srv in SERVIDORES:
+        host = srv["host"] if srv["host"] else f"smtp.{dominio}"
+        testar(email, senha, host, srv["port"], srv["ssl"])
+
+    print("\n################################################")
+    print(" TESTE FINALIZADO")
+    print("################################################\n")
+
+    sys.exit(0)
