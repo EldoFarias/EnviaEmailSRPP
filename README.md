@@ -1,5 +1,6 @@
 # Sistema de Envio Automático de PDFs por Email - SRPP
 
+
 Sistema automatizado que monitora uma pasta de PDFs e envia automaticamente por email quando novos pedidos são fechados no sistema SRPP.
 
 ## Funcionalidades
