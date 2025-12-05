@@ -447,25 +447,26 @@ Equipe SRPP"""
 
             # Montar email
             msg = MIMEMultipart()
-            remetente_nome = self.get_config('EMAIL', 'remetente_nome', fallback='Sistema SRPP')
-            email_usuario = self.get_config('EMAIL', 'usuario')
+            email_usuario = self.get_config('EMAIL', 'usuario')  # Usado para autenticação SMTP
+            email_remetente = self.get_config('EMAIL', 'remetente_nome')  # EmailRemetente do banco (FROM)
+            email_reply_to = self.get_config('EMAIL', 'reply_to')  # EmailResponderPara (Reply-To)
 
-            # Usar EmailRemetente do banco ou montar com nome + email
-            if remetente_nome and remetente_nome != 'Sistema SRPP':
-                # Se EmailRemetente está preenchido no banco, usa ele diretamente
-                msg['From'] = f"{remetente_nome} <{email_usuario}>"
-            else:
-                # Se não, usa o padrão
-                msg['From'] = f"Sistema SRPP <{email_usuario}>"
+            # Determinar o endereço FROM (quem "envia" o email)
+            # Se EmailRemetente está configurado, usa ele (Send As com nao-responda@sint.com.br)
+            # Caso contrário, usa email_usuario
+            email_from = email_remetente if email_remetente else email_usuario
 
+            # Montar o cabeçalho From (apenas o email, sem nome personalizado neste caso)
+            msg['From'] = email_from
             msg['To'] = destinatario_principal
             msg['Subject'] = assunto
 
             # Configurar Reply-To se estiver definido no banco
-            email_reply_to = self.get_config('EMAIL', 'reply_to')
             if email_reply_to:
                 msg['Reply-To'] = email_reply_to
-                self.logger.debug(f"Pedido {numero_pedido}: Reply-To configurado para {email_reply_to}")
+                self.logger.debug(f"Pedido {numero_pedido}: Autenticando como {email_usuario}, FROM={email_from}, Reply-To={email_reply_to}")
+            else:
+                self.logger.debug(f"Pedido {numero_pedido}: Autenticando como {email_usuario}, FROM={email_from}")
 
             if lista_copia:
                 msg['Cc'] = ', '.join(lista_copia)
@@ -493,8 +494,8 @@ Equipe SRPP"""
             self.logger.debug(f"Pedido {numero_pedido}: Autenticando como {email_usuario}")
             senha_app = self.get_config('EMAIL', 'senha_app')
             server.login(email_usuario, senha_app)
-            self.logger.debug(f"Pedido {numero_pedido}: Enviando email para {len(todos_destinatarios)} destinatário(s)")
-            server.sendmail(email_usuario, todos_destinatarios, msg.as_string())
+            self.logger.debug(f"Pedido {numero_pedido}: Enviando email FROM {email_from} para {len(todos_destinatarios)} destinatário(s)")
+            server.sendmail(email_from, todos_destinatarios, msg.as_string())
             server.quit()
 
             self.logger.info(f"{'REENVIO' if eh_reenvio else 'EMAIL'} enviado com sucesso - Pedido {numero_pedido} - Total de destinatários: {len(todos_destinatarios)}")
