@@ -433,6 +433,11 @@ Equipe SRPP"""
                 else:
                     self.logger.debug(f"Pedido {numero_pedido}: Email será enviado como TEXTO")
 
+            # Obter variáveis de email antes de usar nos templates
+            email_usuario = self.get_config('EMAIL', 'usuario')  # Usado para autenticação SMTP
+            email_remetente = self.get_config('EMAIL', 'remetente_nome')  # EmailRemetente do banco (FROM)
+            email_reply_to = self.get_config('EMAIL', 'reply_to')  # EmailResponderPara (Reply-To)
+
             # Preparar variáveis para substituição
             data_formatada = data_pedido_fechado.strftime("%d/%m/%Y") if data_pedido_fechado else datetime.now().strftime("%d/%m/%Y")
 
@@ -451,23 +456,33 @@ Equipe SRPP"""
                 RazaoSocial=nome_cliente,
                 DataPedidoFechado=data_formatada,
                 VersaoPdf=versao_pdf,
-                MensagemReenvio=mensagem_reenvio
+                MensagemReenvio=mensagem_reenvio,
+                ResponderPara=email_reply_to if email_reply_to else '',
+                EmailReplyTo=email_reply_to if email_reply_to else '',
+                HeaderColor='#0a77d5'  # Cor padrão azul
             )
 
             # Substituir variáveis no corpo
-            corpo = corpo_template.format(
-                NroPedido=numero_pedido,
-                RazaoSocial=nome_cliente,
-                DataPedidoFechado=data_formatada,
-                VersaoPdf=versao_pdf,
-                MensagemReenvio=mensagem_reenvio
-            )
+            try:
+                self.logger.debug(f"Pedido {numero_pedido}: Template do corpo: {repr(corpo_template[:100])}")
+                corpo = corpo_template.format(
+                    NroPedido=numero_pedido,
+                    RazaoSocial=nome_cliente,
+                    DataPedidoFechado=data_formatada,
+                    VersaoPdf=versao_pdf,
+                    MensagemReenvio=mensagem_reenvio,
+                    ResponderPara=email_reply_to if email_reply_to else '',
+                    EmailReplyTo=email_reply_to if email_reply_to else '',
+                    HeaderColor='#0a77d5'  # Cor padrão azul
+                )
+                self.logger.debug(f"Pedido {numero_pedido}: Corpo formatado com sucesso")
+            except KeyError as e:
+                self.logger.error(f"Pedido {numero_pedido}: Variável não encontrada no template: {e}")
+                self.logger.error(f"Pedido {numero_pedido}: Template que causou erro: {repr(corpo_template[:500])}")
+                raise
 
             # Montar email
             msg = MIMEMultipart()
-            email_usuario = self.get_config('EMAIL', 'usuario')  # Usado para autenticação SMTP
-            email_remetente = self.get_config('EMAIL', 'remetente_nome')  # EmailRemetente do banco (FROM)
-            email_reply_to = self.get_config('EMAIL', 'reply_to')  # EmailResponderPara (Reply-To)
 
             # Determinar o endereço FROM (quem "envia" o email)
             # Se EmailRemetente está configurado, usa ele (Send As com nao-responda@sint.com.br)
@@ -533,7 +548,9 @@ Equipe SRPP"""
             self.logger.error(f"Pedido {numero_pedido}: ERRO SMTP - {e}")
             return False
         except Exception as e:
+            import traceback
             self.logger.error(f"Pedido {numero_pedido}: ERRO INESPERADO ao enviar email - {e}")
+            self.logger.error(f"Traceback completo:\n{traceback.format_exc()}")
             return False
             
     def processar_pedido(self, pedido):
