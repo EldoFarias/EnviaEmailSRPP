@@ -58,6 +58,7 @@ Segue em anexo o PDF do seu pedido {NroPedido}.
 
 Atenciosamente,
 Equipe SRPP',
+    EmailExpositor NVARCHAR(255) NULL,
 
     -- Configurações do Sistema
     SistemaVerificacaoInicial BIT NOT NULL DEFAULT 1,
@@ -139,6 +140,8 @@ PRINT '- {RazaoSocial}: Nome do cliente';
 PRINT '- {DataPedidoFechado}: Data que o pedido foi fechado';
 PRINT '- {MensagemReenvio}: Mensagem automática de reenvio (se aplicável)';
 PRINT '- {VersaoPdf}: Versão do PDF (1, 2, 3...)';
+PRINT '- {EmailExpositor}: Email do expositor (configurado na tabela ConfiguracaoSistemaEmail)';
+PRINT '- {EmailRepresentante}: Email do representante do pedido';
 PRINT '';
 PRINT 'EXEMPLO DE CONSULTA:';
 PRINT 'SELECT * FROM ConfiguracaoSistemaEmail WHERE Ativo = 1;';

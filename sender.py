@@ -71,7 +71,8 @@ class SistemaEnvioEmails:
                     SistemaVerificacaoInicial, SistemaAguardarSegundosAposArquivo,
                     SistemaVerificacaoPeriodicaAtiva, SistemaVerificacaoPeriodicaMinutos,
                     SistemaCooldownTentativa1, SistemaCooldownTentativa2, SistemaCooldownTentativa3,
-                    SistemaCooldownTentativa4, SistemaCooldownTentativa5Mais
+                    SistemaCooldownTentativa4, SistemaCooldownTentativa5Mais,
+                    EmailExpositor
                 FROM ConfiguracaoSistemaEmail
                 WHERE Ativo = 1
             """
@@ -103,6 +104,7 @@ class SistemaEnvioEmails:
                     'cooldown_tentativa_3': row.SistemaCooldownTentativa3,
                     'cooldown_tentativa_4': row.SistemaCooldownTentativa4,
                     'cooldown_tentativa_5_mais': row.SistemaCooldownTentativa5Mais,
+                    'email_expositor': row.EmailExpositor,
                 }
                 self.logger.info("Configurações carregadas do banco de dados com sucesso!")
                 self.conexao_db.close()
@@ -258,10 +260,11 @@ class SistemaEnvioEmails:
             c.EMAIL as EmailCliente, c.NomeContato as NomeCliente,
             cep.VersaoPdfEnviada, cep.StatusProcessamento, cep.EmailEnviado,
             cep.TentativasEnvio, NULL as DataUltimaVerificacao, cep.UltimoErro,
-            cep.EnviarEmailCliente
+            cep.EnviarEmailCliente, rep.EmailRepresentante
         FROM ControleEmailPedidos cep
         INNER JOIN CabecalhoPedido cap ON cap.NroPedido = cep.NroPedido
         INNER JOIN Cliente c ON c.CodCliente = cap.CodCliente
+        LEFT JOIN Representante rep ON rep.CodRepresentante = cap.CodRepresentante
         WHERE cap.SituacaoAtual = 'F'
             AND (
                 (cep.StatusProcessamento = 'PENDENTE' AND cep.EmailEnviado = 0) OR
@@ -311,7 +314,8 @@ class SistemaEnvioEmails:
                         'versao_pdf_enviada': versao_enviada, 'status_atual': status_atual,
                         'versao_disponivel': versao_disponivel, 'motivo_processamento': motivo,
                         'caminho_pdf': caminho_pdf, 'tentativas_anteriores': row.TentativasEnvio or 0,
-                        'ultimo_erro': row.UltimoErro, 'enviar_email_cliente': row.EnviarEmailCliente
+                        'ultimo_erro': row.UltimoErro, 'enviar_email_cliente': row.EnviarEmailCliente,
+                        'email_representante': row.EmailRepresentante
                     })
                     
             self.logger.info(f"Encontrados {len(pedidos_para_processar)} pedidos para processar")
@@ -371,7 +375,13 @@ class SistemaEnvioEmails:
         except Exception as e:
             self.logger.error(f"Erro ao atualizar status do pedido {id_controle}: {e}")
             
-    def enviar_email(self, destinatario, nome_cliente, numero_pedido, caminho_pdf, emails_copia=None, eh_reenvio=False, versao_pdf=1, enviar_para_cliente=True, data_pedido_fechado=None):
+    def _email_valido(self, email):
+        """Verifica se um endereço de email é válido e não está vazio"""
+        if not email or not str(email).strip():
+            return False
+        return bool(re.match(r'^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$', str(email).strip()))
+
+    def enviar_email(self, destinatario, nome_cliente, numero_pedido, caminho_pdf, emails_copia=None, eh_reenvio=False, versao_pdf=1, enviar_para_cliente=True, data_pedido_fechado=None, email_representante=None, email_expositor=None):
         """Envia email com PDF anexo usando templates do banco de dados"""
         try:
             # Determinar destinatários baseado em enviar_para_cliente
@@ -406,6 +416,20 @@ class SistemaEnvioEmails:
                 else:
                     self.logger.warning(f"Pedido {numero_pedido}: EnviarEmailCliente=0 e EmailsCopia vazio - Nenhum destinatário definido")
                     return False
+
+            # Adicionar EmailExpositor ao CC se válido e não duplicado
+            if self._email_valido(email_expositor):
+                existentes = {e.lower() for e in lista_copia + ([destinatario_principal] if destinatario_principal else [])}
+                if str(email_expositor).strip().lower() not in existentes:
+                    lista_copia.append(str(email_expositor).strip())
+                    self.logger.info(f"Pedido {numero_pedido}: EmailExpositor adicionado ao CC: {email_expositor}")
+
+            # Adicionar EmailRepresentante ao CC se válido e não duplicado
+            if self._email_valido(email_representante):
+                existentes = {e.lower() for e in lista_copia + ([destinatario_principal] if destinatario_principal else [])}
+                if str(email_representante).strip().lower() not in existentes:
+                    lista_copia.append(str(email_representante).strip())
+                    self.logger.info(f"Pedido {numero_pedido}: EmailRepresentante adicionado ao CC: {email_representante}")
 
             # Obter templates do banco de dados ou usar padrões
             assunto_template = self.config_db.get('email_assunto') if self.config_db else 'Pedido {NroPedido} - PDF Anexado'
@@ -459,7 +483,9 @@ Equipe SRPP"""
                 MensagemReenvio=mensagem_reenvio,
                 ResponderPara=email_reply_to if email_reply_to else '',
                 EmailReplyTo=email_reply_to if email_reply_to else '',
-                HeaderColor='#0a77d5'  # Cor padrão azul
+                HeaderColor='#0a77d5',
+                EmailRepresentante=str(email_representante).strip() if self._email_valido(email_representante) else '',
+                EmailExpositor=str(email_expositor).strip() if self._email_valido(email_expositor) else '',
             )
 
             # Substituir variáveis no corpo
@@ -473,7 +499,9 @@ Equipe SRPP"""
                     MensagemReenvio=mensagem_reenvio,
                     ResponderPara=email_reply_to if email_reply_to else '',
                     EmailReplyTo=email_reply_to if email_reply_to else '',
-                    HeaderColor='#0a77d5'  # Cor padrão azul
+                    HeaderColor='#0a77d5',
+                    EmailRepresentante=str(email_representante).strip() if self._email_valido(email_representante) else '',
+                    EmailExpositor=str(email_expositor).strip() if self._email_valido(email_expositor) else '',
                 )
                 self.logger.debug(f"Pedido {numero_pedido}: Corpo formatado com sucesso")
             except KeyError as e:
@@ -564,6 +592,8 @@ Equipe SRPP"""
 
             eh_reenvio = (pedido['motivo_processamento'] == "REENVIO_VERSAO_ATUALIZADA")
             enviar_para_cliente = pedido.get('enviar_email_cliente', 1) == 1  # Converte para boolean
+            email_expositor = self.config_db.get('email_expositor') if self.config_db else None
+            email_representante = pedido.get('email_representante')
 
             if self.enviar_email(
                 pedido['email_cliente'],
@@ -574,7 +604,9 @@ Equipe SRPP"""
                 eh_reenvio,
                 pedido['versao_disponivel'],
                 enviar_para_cliente,
-                pedido['data_fechamento']
+                pedido['data_fechamento'],
+                email_representante=email_representante,
+                email_expositor=email_expositor
             ):
                 query = "UPDATE ControleEmailPedidos SET StatusProcessamento = 'ENVIADO', EmailEnviado = 1, VersaoPdfEnviada = ?, DataEnvio = GETDATE(), UltimoErro = NULL, TentativasEnvio = 0 WHERE Id = ?"
                 cursor = self.conexao_db.cursor()
@@ -621,6 +653,8 @@ Equipe SRPP"""
     def executar_ciclo(self):
         """Executa um ciclo completo de processamento"""
         self.logger.info("=== Iniciando ciclo de processamento ===")
+        # Recarrega configurações a cada ciclo para refletir mudanças imediatamente
+        self.carregar_configuracoes_banco()
         if not self.conectar_banco(): return
         
         try:
