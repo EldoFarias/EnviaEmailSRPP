@@ -11,7 +11,8 @@ Para usar uma variável, escreva o nome dela entre chaves: `{NomeVariavel}`
 | Variável | Descrição | Exemplo |
 |---|---|---|
 | `{NroPedido}` | Número do pedido | `0001234` |
-| `{RazaoSocial}` | Nome/Razão Social do cliente | `Empresa ABC Ltda` |
+| `{RazaoSocial}` | Nome do contato do cliente (campo `NomeContato` da tabela `Cliente`) | `João da Silva` |
+| `{NomeContato}` | Mesmo que `{RazaoSocial}` — alias com nome mais descritivo | `João da Silva` |
 | `{DataPedidoFechado}` | Data em que o pedido foi fechado | `15/03/2025` |
 | `{VersaoPdf}` | Versão do PDF anexo (1, 2, 3...) | `1` |
 | `{MensagemReenvio}` | Texto automático quando é um reenvio de versão atualizada. **Vazio no primeiro envio.** | `ATENÇÃO: Esta é uma versão atualizada...` |

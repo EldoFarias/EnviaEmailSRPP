@@ -478,6 +478,7 @@ Equipe SRPP"""
             assunto = assunto_template.format(
                 NroPedido=numero_pedido,
                 RazaoSocial=nome_cliente,
+                NomeContato=nome_cliente,
                 DataPedidoFechado=data_formatada,
                 VersaoPdf=versao_pdf,
                 MensagemReenvio=mensagem_reenvio,
@@ -494,6 +495,7 @@ Equipe SRPP"""
                 corpo = corpo_template.format(
                     NroPedido=numero_pedido,
                     RazaoSocial=nome_cliente,
+                    NomeContato=nome_cliente,
                     DataPedidoFechado=data_formatada,
                     VersaoPdf=versao_pdf,
                     MensagemReenvio=mensagem_reenvio,
